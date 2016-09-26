@@ -18,7 +18,7 @@ pub struct DemoDrawer<'a> {
 
     display:    &'a glium::Display,
     ui_shader:  &'a glium::Program,
-    frame:      &'a mut glium::Frame,
+    frame:      glium::Frame,
 }
 
 impl<'a> immi::Draw for DemoDrawer<'a> {
@@ -51,17 +51,8 @@ impl<'a> immi::Draw for DemoDrawer<'a> {
             tex: texture,
         };
 
-        println!("draw_triangle");
-        println!("matrix = {:?}", matrix);
-        println!("uv_coords = {:?}", uv_coords);
-        // let mut target = self.display.draw();
-        // target.draw(&vertex_buffer, &indices, &self.ui_shader,
-        //             &uniforms, &Default::default()).unwrap();
-        // target.finish().unwrap();
         self.frame.draw(&vertex_buffer, &indices, &self.ui_shader,
                         &uniforms, &Default::default()).unwrap();
-        // This prevents a crash, but it also happens too early
-        //self.frame.finish().unwrap();
     }
 
     /// Given an image, this functions returns its width divided by its height.
@@ -193,13 +184,6 @@ fn main() {
         font:       Font<'a>,
     }
 
-    let mut drawer = DemoDrawer {
-        font_proxy: PhantomData::default(),
-        display:    &display,
-        ui_shader:  &ui_shader,
-        frame:      &mut display.draw(),
-    };
-
     let image   = image::load(Cursor::new(&include_bytes!("../bee-trixel.png")[..]),
                              image::PNG).unwrap().to_rgba();
     let id      = image.dimensions();
@@ -211,31 +195,42 @@ fn main() {
         background: texture,
         font:       font,
     };
-    
-    fn draw_ui<'a>(ctxt: &immi::DrawContext<DemoDrawer<'a>>, display: &glium::Display, ui_state: &mut UiState<'a>)
+
+    fn draw_ui<'a>(ctxt: &immi::DrawContext<DemoDrawer<'a>>, ui_state: &mut UiState<'a>)
     {
-        // Clear the screen before we do anything else
-        let mut target = display.draw();
-        target.clear_color(0.0, 0.0, 1.0, 1.0);
-        
         // This doesn't render correctly, not sure why
         immi::widgets::image::draw(ctxt, &ui_state.background, &immi::Alignment::top());
         //immi::widgets::label::flow(ctxt, &ui_state.font, &"Hello, World!", &immi::HorizontalAlignment::Left);
-        target.finish().unwrap();
     }
-
-    
-    let ui_context = immi::draw();
-    let ui_context = ui_context.draw(1024.0, 768.0, &mut drawer, None, false, false);
-    draw_ui(&ui_context, &display, &mut ui_state);
 
     'main: loop {
 
+        // Create a new frame and clear the screen before we do
+        // anything else.
+        //
+        // Note: We create a new DemoDrawer value every iteration
+        // because it owns `frame` and we need `frame` to get dropped
+        // at the end. We can't call `finish()` directly because it
+        // requires a move.  So instead we call `set_finish()` and let
+        // Drop force the buffer swap.
+        let mut drawer = DemoDrawer {
+            font_proxy: PhantomData::default(),
+            display:    &display,
+            ui_shader:  &ui_shader,
+            frame:      display.draw(),
+        };
+        drawer.frame.clear_color(0.0, 0.0, 1.0, 1.0);
+        let ui_context = immi::draw();
+        let ui_context = ui_context.draw(1024.0, 768.0, &mut drawer, None, false, false);
+        
+        draw_ui(&ui_context, &mut ui_state);
+        ui_context.draw().frame.set_finish().unwrap();
         
         for ev in display.poll_events() {
             match ev {
                 glium::glutin::Event::Closed => break 'main,
-                _ => ()
+                _ => {
+                }
             }
         }
     }
