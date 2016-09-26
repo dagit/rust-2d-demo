@@ -1,3 +1,0 @@
-[target.x86_64-pc-windows-msvc.freetype]
-rustc-link-search = ["./external-binaries/windows-msvc/"]
-rustc-link-lib    = ["freetype"]

@@ -10,6 +10,8 @@ debug     = true
 [dependencies]
 glium      = "*"
 glutin     = "*"
-glium_text = "*"
-cgmath     = "*"
+rusttype   = "*"
+immi       = "*"
+image      = "*"
+
 
