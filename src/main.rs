@@ -64,8 +64,10 @@ impl<'a> immi::Draw for DemoDrawer<'a> {
             tex:    texture,
         };
 
+        let blend = glium::Blend::alpha_blending();
+        let draw_params = glium::DrawParameters { blend: blend, ..Default::default() };
         self.frame.draw(&vertex_buffer, &indices, &self.ui_shader,
-                        &uniforms, &Default::default()).unwrap();
+                        &uniforms, &draw_params).unwrap();
     }
 
     /// Given an image, this functions returns its width divided by its height.
@@ -109,10 +111,9 @@ impl<'a> immi::Draw for DemoDrawer<'a> {
                 let mut pixels = vec![0; size];
                 glyph.draw(|x,y,v| {
                     let v = ((v * 255.0) + 0.5).floor().max(0.0).min(255.0) as u8;
-                    for i in 0..(depth-1) {
+                    for i in 0..depth {
                         pixels[index(x,y,width,depth) + i as usize] = v;
                     }
-                    pixels[index(x,y,width,depth) + depth as usize - 1] = 255;
                 });
                 let raw = glium::texture::RawImage2d::from_raw_rgba(pixels, (width, height));
                 let tex = glium::texture::texture2d::Texture2d::new(self.display, raw).unwrap();
@@ -160,17 +161,19 @@ impl<'a> immi::Draw for DemoDrawer<'a> {
         let ems: Vec<rusttype::PositionedGlyph> =
             font.layout(&'M'.to_string(), scale, offset)
             .collect();
-        let glyph   = &glyphs[0];
-        let em      = &ems[0];
+        let glyph        = &glyphs[0];
+        let em           = &ems[0];
+        let h_metrics    = glyph.clone().into_unpositioned().h_metrics();
+        let em_h_metrics = em.clone().into_unpositioned().h_metrics();
         if let Some(glyphbb) = glyph.pixel_bounding_box() {
             if let Some(embb) = em.pixel_bounding_box() {
                 // This doesn't seem to be quite right, but it's close
                 // in some cases.
                 return immi::GlyphInfos { width: glyphbb.width() as f32 / embb.width() as f32,
-                                         height: glyphbb.height() as f32 / embb.height() as f32,
-                                         x_offset: 0.0,
-                                         y_offset: 1.0,
-                                         x_advance: 1.0}
+                                          height: glyphbb.height() as f32 / embb.height() as f32,
+                                          x_offset: 0.0,
+                                          y_offset: 1.0,
+                                          x_advance: h_metrics.advance_width / em_h_metrics.advance_width}
             } else {
                 //println!("No embb");
             }
