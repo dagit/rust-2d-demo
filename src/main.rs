@@ -144,10 +144,8 @@ impl<'a> immi::Draw for DemoDrawer<'a> {
     {
         // For some reason all my attempts to calculate the kerning have been wrong
         // so I just return 0.0 here. Which is also not great, but works.
-        // let scale = rusttype::Scale::uniform(textinfo.size);
-        // textinfo.font.pair_kerning(scale, a, b);
-        0.0
-        
+        let scale = rusttype::Scale::uniform(textinfo.size);
+        textinfo.font.pair_kerning(scale, a, b)
     }
     
     fn glyph_infos(&self, textinfo: &TextInfo<'a>, c: char) -> immi::GlyphInfos {
@@ -167,13 +165,11 @@ impl<'a> immi::Draw for DemoDrawer<'a> {
         let em_h_metrics = em.clone().into_unpositioned().h_metrics();
         if let Some(glyphbb) = glyph.pixel_bounding_box() {
             if let Some(embb) = em.pixel_bounding_box() {
-                // This doesn't seem to be quite right, but it's close
-                // in some cases.
                 return immi::GlyphInfos { width: glyphbb.width() as f32 / embb.width() as f32,
                                           height: glyphbb.height() as f32 / embb.height() as f32,
-                                          x_offset: 0.0,
-                                          y_offset: 1.0,
-                                          x_advance: h_metrics.advance_width / em_h_metrics.advance_width}
+                                          x_offset: h_metrics.left_side_bearing / embb.width() as f32,
+                                          y_offset: glyphbb.max.y as f32 / embb.height() as f32,
+                                          x_advance: h_metrics.advance_width / embb.width() as f32}
             } else {
                 //println!("No embb");
             }
