@@ -61,7 +61,7 @@ impl<'a> immi::Draw for DemoDrawer<'a> {
         let indices       = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
         let uniforms      = uniform! {
             matrix: Into::<[[f32; 4]; 4]>::into(*matrix),
-            tex:    texture,
+            tex:    texture.sampled().wrap_function(glium::uniforms::SamplerWrapFunction::Clamp),
         };
 
         let blend = glium::Blend::alpha_blending();
@@ -117,6 +117,7 @@ impl<'a> immi::Draw for DemoDrawer<'a> {
                 });
                 let raw = glium::texture::RawImage2d::from_raw_rgba(pixels, (width, height));
                 let tex = glium::texture::texture2d::Texture2d::new(self.display, raw).unwrap();
+
 
                 // I'm not sure why, but we need to invert the y-axis
                 // here.  From the docs I would have thought we didn't
