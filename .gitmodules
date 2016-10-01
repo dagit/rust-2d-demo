@@ -1,0 +1,3 @@
+[submodule "deps/glium-sdl2"]
+	path = deps/glium-sdl2
+	url = git@github.com:dagit/glium-sdl2.git
