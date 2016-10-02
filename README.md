@@ -30,8 +30,7 @@ TODO
 1. Checkout/update git submodules:
 
     ```sh
-    $ git submodule init
-    $ git submodule update
+    $ git submodule update --init --recursive
     ```
 
 2. Follow the instructions for `rust-sdl2` for OSX: [https://github.com/AngryLawyer/rust-sdl2#mac-os-x](https://github.com/AngryLawyer/rust-sdl2#mac-os-x)
