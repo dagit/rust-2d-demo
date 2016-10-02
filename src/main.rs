@@ -1,9 +1,7 @@
 #[macro_use]
 extern crate glium;
-extern crate glutin;
 extern crate glium_sdl2;
 extern crate sdl2;
-extern crate rusttype;
 extern crate image;
 extern crate rand;
 extern crate time;
@@ -11,8 +9,7 @@ extern crate time;
 #[macro_use]
 extern crate imgui;
 
-//use rusttype::Font;
-//use glium::texture::texture2d::Texture2d;
+use glium::texture::texture2d::Texture2d;
 
 use std::io::Cursor;
 
@@ -62,24 +59,28 @@ fn print_context_info(display: &glium_sdl2::SDL2Facade)
 
 use sdl2::audio::{AudioCallback, AudioSpecDesired};
 
-struct WhitenoiseCallback {
-    volume: f32,
+struct Squarewave {
+    phase_inc: f32,
+    phase:     f32,
+    volume:    f32,
 }
-impl AudioCallback for WhitenoiseCallback {
+
+impl AudioCallback for Squarewave {
     type Channel = f32;
 
     fn callback(&mut self, out: &mut [f32]){
-        use rand::{Rng, thread_rng};
-        let mut rng = thread_rng();
-
-        // Generate white noise
+        // Generate a square wave
         for x in out.iter_mut() {
-            *x = (rng.next_f32()*2.0 - 1.0) * self.volume;
+            *x = match self.phase {
+                0.0 ... 0.5 =>  self.volume,
+                _           => -self.volume,
+            };
+            self.phase = (self.phase + self.phase_inc) % 1.0;
         }
     }
 }
 
-fn start_whitenoise(sdl_context: &sdl2::Sdl) -> sdl2::audio::AudioDevice<WhitenoiseCallback>
+fn start_squarewave(sdl_context: &sdl2::Sdl) -> sdl2::audio::AudioDevice<Squarewave>
 {
 
     // TODO: we need a way to signal exit sharing a channel with
@@ -96,7 +97,11 @@ fn start_whitenoise(sdl_context: &sdl2::Sdl) -> sdl2::audio::AudioDevice<Whiteno
     let device = audio_subsystem.open_playback(None, &audio_spec, |spec|{
         // Show the spec we got
         println!("{:?}", spec);
-        WhitenoiseCallback { volume: 0.5 }
+        Squarewave {
+            phase_inc: 440.0 / spec.freq as f32,
+            phase:     0.0,
+            volume:    0.05,
+        }
     }).unwrap();
 
     // Start playback
@@ -104,6 +109,7 @@ fn start_whitenoise(sdl_context: &sdl2::Sdl) -> sdl2::audio::AudioDevice<Whiteno
     device
 }
 
+#[allow(unused_variables)]
 fn main() {
     use glium_sdl2::DisplayBuild;
     use sdl2::video::GLProfile;
@@ -121,7 +127,7 @@ fn main() {
         .unwrap();
     print_context_info(&display);
 
-    let ui_shader    = program!(
+    let shader    = program!(
         &display,
         140 => {
             vertex: r#"
@@ -152,34 +158,64 @@ fn main() {
             "#
         }).unwrap();
 
-    let font_data    = include_bytes!("../assets/Arial Unicode.ttf");
-    let collection   = rusttype::FontCollection::from_bytes(font_data as &[u8]);
-    let font         = collection.into_font().unwrap();
-
     let image   = image::load(Cursor::new(&include_bytes!("../assets/bee-trixel.png")[..]),
                              image::PNG).unwrap().to_rgba();
     let id      = image.dimensions();
     let image   = glium::texture::RawImage2d::from_raw_rgba_reversed(image.into_raw(), id);
     let texture = glium::texture::Texture2d::new(&display, image).unwrap();
 
-    let mut audio_device = start_whitenoise(&sdl_context);
-
-    {
-        // Acquire a lock. This lets us read and modify callback data.
-        let mut lock = audio_device.lock();
-        (*lock).volume = 0.24;
-        // Lock guard is dropped here
-    }
+    // For reasons I don't understand, if we don't name the result of
+    // start_squarewave then it will never start playing. Perhaps it
+    // gets dropped immediately which would cause the thread to get
+    // killed.
+    let x = start_squarewave(&sdl_context);
 
     let mut support = Support::init(display, sdl_context);
     'main: loop {
         // Check if we should exit before we do anything else
         let active = support.update_events();
         if !active { break 'main }
-        support.render((0.0, 0.0, 1.0, 1.0), display_info);
-
-
+        support.render((0.0, 0.0, 1.0, 1.0), display_info,
+                       |frame: &mut glium::Frame, display: &mut glium_sdl2::Display| {
+                           draw_scene(frame, display, &texture, &shader);
+                       });
     }
+}
+
+fn draw_scene(frame: &mut glium::Frame,
+              display: &mut glium_sdl2::Display,
+              texture: &Texture2d,
+              program: &glium::Program)
+{
+    use glium::Surface;
+    #[derive(Copy, Clone)]
+    struct Vertex {
+        position:  [f32; 2],
+        uv_coords: [f32; 2],
+    }
+
+    implement_vertex!(Vertex, position, uv_coords);
+
+    let vertex1 = Vertex { position: [-0.5, -0.5],  uv_coords: [0.0, 0.0] };
+    let vertex2 = Vertex { position: [ 0.0,  0.5],  uv_coords: [0.0, 1.0] };
+    let vertex3 = Vertex { position: [ 0.5, -0.25], uv_coords: [1.0, 0.0] };
+    let shape = vec![vertex1, vertex2, vertex3];
+
+    let vertex_buffer = glium::VertexBuffer::new(display, &shape).unwrap();
+    let indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
+    let uniforms = uniform! {
+        matrix: [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0f32],
+        ],
+        tex: texture.sampled().wrap_function(glium::uniforms::SamplerWrapFunction::Clamp),
+    };
+
+    let blend = glium::Blend::alpha_blending();
+    let draw_params = glium::DrawParameters { blend: blend, ..Default::default() };
+    frame.draw(&vertex_buffer, &indices, program, &uniforms, &draw_params).unwrap();
 }
 
 fn display_info<'a>(ui: &Ui<'a>) {
@@ -262,7 +298,9 @@ impl Support {
         self.mouse_wheel = 0.0;
     }
 
-    pub fn render<F: FnMut(&Ui)>(&mut self, clear_color: (f32, f32, f32, f32), mut run_ui: F) {
+    pub fn render<F: FnMut(&Ui), G: FnMut(&mut glium::Frame, &mut glium_sdl2::Display)>
+        (&mut self, clear_color: (f32, f32, f32, f32), mut run_ui: F, mut draw_scene: G)
+    {
         use glium::Surface;
         let now     = Instant::now();
         let delta   = now - self.last_frame;
@@ -273,6 +311,8 @@ impl Support {
 
         let mut frame   = self.display.draw();
         frame.clear_color(clear_color.0, clear_color.1, clear_color.2, clear_color.3);
+        draw_scene(&mut frame, &mut self.display);
+
         let window      = self.display.window();
 
         let size_pixels = window.drawable_size();

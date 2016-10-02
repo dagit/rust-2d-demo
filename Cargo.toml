@@ -9,9 +9,6 @@ debug     = true
 
 [dependencies]
 glium      = "*"
-glutin     = "*"
-rusttype   = "*"
-immi       = "*"
 image      = "*"
 sdl2       = "*"
 rand       = "*"
