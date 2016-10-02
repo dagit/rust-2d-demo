@@ -17,7 +17,7 @@ In addition to the minimal requirements we also hope to reuse this template for 
 
 # Building
 
-## Widnows
+## Windows
 
 TODO
 
