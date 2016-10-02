@@ -1,3 +1,6 @@
 [submodule "deps/glium-sdl2"]
 	path = deps/glium-sdl2
 	url = git@github.com:dagit/glium-sdl2.git
+[submodule "deps/imgui-rs"]
+	path = deps/imgui-rs
+	url = https://github.com/Gekkio/imgui-rs.git 
