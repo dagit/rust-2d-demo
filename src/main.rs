@@ -1,215 +1,138 @@
 #[macro_use]
 extern crate glium;
 extern crate glutin;
-extern crate immi;
+extern crate glium_sdl2;
+extern crate sdl2;
 extern crate rusttype;
 extern crate image;
+extern crate rand;
+extern crate time;
 
-use rusttype::Font;
-use glium::texture::texture2d::Texture2d;
+#[macro_use]
+extern crate imgui;
 
-use std::marker::PhantomData;
+//use rusttype::Font;
+//use glium::texture::texture2d::Texture2d;
+
 use std::io::Cursor;
 
-pub struct DemoDrawer<'a> {
-    // Just here for the lifetime parameter
-    font_proxy: PhantomData<&'a Font<'a>>,
+fn print_context_info(display: &glium_sdl2::SDL2Facade)
+{
+    use glium::{Api, Profile, Version};
 
-    display:    &'a glium::Display,
-    ui_shader:  &'a glium::Program,
-    frame:      glium::Frame,
+    let version       = *display.get_opengl_version();
+    let api           = match version {
+        Version(Api::Gl  , _, _) => "OpenGL",
+        Version(Api::GlEs, _, _) => "OpenGL ES",
+    };
+
+    println!("{} context version: {}", api, display.get_opengl_version_string());
+    println!("{} context flags:", api);
+
+    if display.is_forward_compatible() {
+        print!(" forward-compatible");
+    }
+    if display.is_debug() {
+        print!(" debug");
+    }
+    if display.is_robust() {
+        print!(" robustness");
+    }
+    print!("\n");
+
+    if version >= Version(Api::Gl, 3, 2) {
+        println!("{} profile mask: {}", api,
+                 match display.get_opengl_profile (){
+                     Some(Profile::Core)          => "core",
+                     Some(Profile::Compatibility) => "compatibility",
+                     None                         => "unknown",
+                 });
+    }
+
+    println!("{} robustness strategy: {}", api,
+             if display.is_context_loss_possible() {
+                 "lose"
+             } else {
+                 "none"
+             });
+
+    println!("{} context renderer: {}", api, display.get_opengl_renderer_string());
+    println!("{} context vendor: {}", api, display.get_opengl_vendor_string());
 }
 
-pub struct TextInfo<'a> {
-    font: Font<'a>,
-    size: f32,
+use sdl2::audio::{AudioCallback, AudioSpecDesired};
+
+struct WhitenoiseCallback {
+    volume: f32,
+}
+impl AudioCallback for WhitenoiseCallback {
+    type Channel = f32;
+
+    fn callback(&mut self, out: &mut [f32]){
+        use rand::{Rng, thread_rng};
+        let mut rng = thread_rng();
+
+        // Generate white noise
+        for x in out.iter_mut() {
+            *x = (rng.next_f32()*2.0 - 1.0) * self.volume;
+        }
+    }
 }
 
+fn start_whitenoise(sdl_context: &sdl2::Sdl) -> sdl2::audio::AudioDevice<WhitenoiseCallback>
+{
 
-pub struct UiState<'a> {
-    #[allow(dead_code)]
-    immi_state: immi::UiState,
-    background: Texture2d,
-    textinfo:   TextInfo<'a>,
-}
+    // TODO: we need a way to signal exit sharing a channel with
+    // the main thread would be a nice abstraction.
 
+    let audio_subsystem = sdl_context.audio().unwrap();
 
-impl<'a> immi::Draw for DemoDrawer<'a> {
-    type ImageResource = Texture2d;
-    type TextStyle     = TextInfo<'a>;
+    let audio_spec = AudioSpecDesired {
+        freq:     Some(44100),
+        channels: Some(1), // mono
+        samples:  None,    // default sample rate
+    };
 
-    fn draw_triangle(&mut self,
-                     texture:   &Texture2d,
-                     matrix:    &immi::Matrix,
-                     uv_coords: [[f32; 2]; 3])
-    {
-        use glium::Surface;
+    let device = audio_subsystem.open_playback(None, &audio_spec, |spec|{
+        // Show the spec we got
+        println!("{:?}", spec);
+        WhitenoiseCallback { volume: 0.5 }
+    }).unwrap();
 
-        #[derive(Copy, Clone)]
-        struct Vertex {
-            position:  [f32; 2],
-            uv_coords: [f32; 2],
-        }
-        implement_vertex!(Vertex, position, uv_coords);
-
-        let vertex1 = Vertex { position: [-1.0,  1.0], uv_coords: uv_coords[0] };
-        let vertex2 = Vertex { position: [-1.0, -1.0], uv_coords: uv_coords[1] };
-        let vertex3 = Vertex { position: [ 1.0,  1.0], uv_coords: uv_coords[2] };
-        let shape = vec![vertex1, vertex2, vertex3];
-
-        let vertex_buffer = glium::VertexBuffer::new(self.display, &shape).unwrap();
-        let indices       = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
-        let uniforms      = uniform! {
-            matrix: Into::<[[f32; 4]; 4]>::into(*matrix),
-            tex:    texture.sampled().wrap_function(glium::uniforms::SamplerWrapFunction::Clamp),
-        };
-
-        let blend = glium::Blend::alpha_blending();
-        let draw_params = glium::DrawParameters { blend: blend, ..Default::default() };
-        self.frame.draw(&vertex_buffer, &indices, &self.ui_shader,
-                        &uniforms, &draw_params).unwrap();
-    }
-
-    /// Given an image, this functions returns its width divided by its height.
-    fn get_image_width_per_height(&mut self, texture: &Texture2d) -> f32
-    {
-        // TODO: is this unwrap safe?
-        texture.get_width() as f32 / texture.get_height().unwrap() as f32
-    }
-
-    /// Does the same as `draw_image`, but draws a glyph of a text
-    /// instead: Draws an image that covers the whole surface (from
-    /// `-1.0` to `1.0` both horizontally and vertically), but
-    /// multiplied by the matrix.
-    ///
-    /// This function should not try to preseve the aspect ratio of the
-    /// image. This is handled by the caller.
-    fn draw_glyph(&mut self, textinfo: &TextInfo<'a>, c: char, matrix: &immi::Matrix)
-    {
-        let font      = &textinfo.font;
-        let scale     = rusttype::Scale::uniform(textinfo.size);
-        let v_metrics = font.v_metrics(scale);
-        let offset    = rusttype::point(0.0, v_metrics.ascent);
-
-        let glyphs: Vec<rusttype::PositionedGlyph> = font
-            .layout(&c.to_string(), scale, offset)
-            .collect();
-
-        fn index(x: u32, y: u32, width: u32, depth: u32) -> usize {
-            (y * width * depth + x * depth) as usize
-        }
-        
-        for glyph in glyphs {
-            if let Some(bb) = glyph.pixel_bounding_box() {
-                let (width, height) = (bb.width() as u32, bb.height() as u32);
-                let depth = 4;
-                // This is wasteful and we can do better. We really
-                // only need to set one channel and then use a special
-                // shader that knows to look at that one channel and
-                // treat it as a greyscale value.
-                let size = height as usize * width as usize * depth as usize;
-                let mut pixels = vec![0; size];
-                glyph.draw(|x,y,v| {
-                    let v = ((v * 255.0) + 0.5).floor().max(0.0).min(255.0) as u8;
-                    for i in 0..depth {
-                        pixels[index(x,y,width,depth) + i as usize] = v;
-                    }
-                });
-                let raw = glium::texture::RawImage2d::from_raw_rgba(pixels, (width, height));
-                let tex = glium::texture::texture2d::Texture2d::new(self.display, raw).unwrap();
-
-
-                // I'm not sure why, but we need to invert the y-axis
-                // here.  From the docs I would have thought we didn't
-                // need to do that.
-                let inverty = immi::Matrix([
-                    [1.0,  0.0],
-                    [0.0, -1.0],
-                    [0.0,  0.0],
-                    ]
-                );
-                let invertedmat = inverty * *matrix;
-                self.draw_image(&tex, &invertedmat);
-            }
-        }
-    }
-
-    /// Returns the height of a line of text in EMs.
-    ///
-    /// This value is usually somewhere around `1.2`.
-    /// TODO: get this from the font info
-    fn line_height(&self, _: &TextInfo<'a>) -> f32 { 1.2 }
-
-    #[allow(unused_variables)]
-    fn kerning(&self, textinfo: &TextInfo<'a>, a: char, b: char) -> f32
-    {
-        // For some reason all my attempts to calculate the kerning have been wrong
-        // so I just return 0.0 here. Which is also not great, but works.
-        let scale = rusttype::Scale::uniform(textinfo.size);
-        textinfo.font.pair_kerning(scale, a, b)
-    }
-    
-    fn glyph_infos(&self, textinfo: &TextInfo<'a>, c: char) -> immi::GlyphInfos {
-        let font      = &textinfo.font;
-        let scale     = rusttype::Scale::uniform(textinfo.size);
-        let v_metrics = font.v_metrics(scale);
-        let offset    = rusttype::point(0.0, v_metrics.ascent);
-        let glyphs: Vec<rusttype::PositionedGlyph> =
-            font.layout(&c.to_string(), scale, offset)
-            .collect();
-        let ems: Vec<rusttype::PositionedGlyph> =
-            font.layout(&'M'.to_string(), scale, offset)
-            .collect();
-        let glyph        = &glyphs[0];
-        let em           = &ems[0];
-        let h_metrics    = glyph.clone().into_unpositioned().h_metrics();
-        let em_h_metrics = em.clone().into_unpositioned().h_metrics();
-        if let Some(glyphbb) = glyph.pixel_bounding_box() {
-            if let Some(embb) = em.pixel_bounding_box() {
-                return immi::GlyphInfos { width: glyphbb.width() as f32 / embb.width() as f32,
-                                          height: glyphbb.height() as f32 / embb.height() as f32,
-                                          x_offset: h_metrics.left_side_bearing / embb.width() as f32,
-                                          y_offset: glyphbb.max.y as f32 / embb.height() as f32,
-                                          x_advance: h_metrics.advance_width / embb.width() as f32}
-            } else {
-                //println!("No embb");
-            }
-        } else {
-            //println!("no glyphbb for '{}'", c);
-        }
-
-        // This is the default value if we couldn't calculate something
-        // more reasonable
-        immi::GlyphInfos { width: 1.0, height: 1.0, x_offset: 0.0,
-                          y_offset: 1.0, x_advance: 1.0}
-
-    }
-    
+    // Start playback
+    device.resume();
+    device
 }
 
 fn main() {
-    use glium::{DisplayBuild, Surface};
+    use glium_sdl2::DisplayBuild;
+    use sdl2::video::GLProfile;
 
-    let window_width  = 1024.0;
-    let window_height = 768.0;
-    let display      = glium::glutin::WindowBuilder::new()
-        .with_vsync()
-        .with_dimensions(window_width as u32, window_height as u32)
-        .with_srgb(Some(true))
+    let sdl_context     = sdl2::init().unwrap();
+    let video_subsystem = sdl_context.video().unwrap();
+    let gl_attr         = video_subsystem.gl_attr();
+    gl_attr.set_context_profile(GLProfile::Core);
+
+    let window_width  = 1024;
+    let window_height = 768;
+    let display       = video_subsystem.window("Rust 2D Demo", window_width, window_height)
+        .resizable()
         .build_glium()
         .unwrap();
+    print_context_info(&display);
+
     let ui_shader    = program!(
         &display,
         140 => {
             vertex: r#"
                 #version 140
-                
+
                 in  vec2 position;
                 in  vec2 uv_coords;
                 out vec2 v_uv_coords;
-                
+
                 uniform mat4 matrix;
-                
+
                 void main() {
                     v_uv_coords = uv_coords;
                     gl_Position = matrix * vec4(position, 0.0, 1.0);
@@ -217,19 +140,18 @@ fn main() {
             "#,
             fragment: r#"
                 #version 140
-                
+
                 in  vec2 v_uv_coords;
                 out vec4 color;
-                
+
                 uniform sampler2D tex;
-                
+
                 void main() {
                     color = texture(tex, v_uv_coords);
                 }
             "#
         }).unwrap();
 
-    //let font_data    = include_bytes!("../assets/font.ttf");
     let font_data    = include_bytes!("../assets/Arial Unicode.ttf");
     let collection   = rusttype::FontCollection::from_bytes(font_data as &[u8]);
     let font         = collection.into_font().unwrap();
@@ -240,59 +162,202 @@ fn main() {
     let image   = glium::texture::RawImage2d::from_raw_rgba_reversed(image.into_raw(), id);
     let texture = glium::texture::Texture2d::new(&display, image).unwrap();
 
-    // let dpi_factor = display.get_window().unwrap().hidpi_factor();
-    // println!("dpi_factor is {}", dpi_factor);
-    
-    let mut ui_state : UiState = UiState {
-        immi_state: Default::default(),
-        background: texture,
-        textinfo:   TextInfo {
-            font: font,
-            size: 1000.0,
-        }
-    };
+    let mut audio_device = start_whitenoise(&sdl_context);
 
-    fn draw_ui<'a>(ctxt: &immi::DrawContext<DemoDrawer<'a>>, ui_state: &mut UiState<'a>)
     {
-
-        immi::widgets::image::draw(ctxt, &ui_state.background, &immi::Alignment::top());
-        // This doesn't render correctly, not sure why
-        // immi::widgets::label::flow(ctxt, &ui_state.textinfo, &"Hello, World!",
-        //                         &immi::HorizontalAlignment::Left);
-        immi::widgets::label::contain(ctxt, &ui_state.textinfo, &"Hello, World!",
-                                   &immi::Alignment::center());
-
+        // Acquire a lock. This lets us read and modify callback data.
+        let mut lock = audio_device.lock();
+        (*lock).volume = 0.24;
+        // Lock guard is dropped here
     }
 
+    let mut support = Support::init(display, sdl_context);
     'main: loop {
+        // Check if we should exit before we do anything else
+        let active = support.update_events();
+        if !active { break 'main }
+        support.render((0.0, 0.0, 1.0, 1.0), display_info);
 
-        // Create a new frame and clear the screen before we do
-        // anything else.
-        //
-        // Note: We create a new DemoDrawer value every iteration
-        // because it owns `frame` and we need `frame` to get dropped
-        // at the end. We can't call `finish()` directly because it
-        // requires a move.  So instead we call `set_finish()` and let
-        // Drop force the buffer swap.
-        let mut drawer = DemoDrawer {
-            font_proxy: PhantomData::default(),
-            display:    &display,
-            ui_shader:  &ui_shader,
-            frame:      display.draw(),
+
+    }
+}
+
+fn display_info<'a>(ui: &Ui<'a>) {
+    ui.window(im_str!("Debug Info"))
+        .size((400.0, 100.0), ImGuiSetCond_Always)
+        .position((0.0, 0.0), ImGuiSetCond_Always)
+        .collapsible(false)
+        .movable(false)
+        .resizable(false)
+        .title_bar(true)
+        .show_borders(false)
+        .build(|| {
+            let mouse_pos = ui.imgui().mouse_pos();
+            ui.text(im_str!("Mouse Position: ({:.1},{:.1})", mouse_pos.0, mouse_pos.1));
+            ui.text(im_str!("Frame rate: {:.1}", ui.framerate()));
+        })
+}
+
+// Everything here for imgui is taken basically verbatim from the
+// example in the imgui-rs repo
+use imgui::*;
+use imgui::glium_renderer::Renderer;
+use std::time::Instant;
+
+
+struct Support {
+    display:       glium_sdl2::Display,
+    event_pump:    sdl2::EventPump,
+    imgui:         ImGui,
+    renderer:      Renderer,
+    last_frame:    Instant,
+    mouse_pos:     (i32, i32),
+    mouse_pressed: (bool, bool, bool),
+    mouse_wheel:   f32,
+}
+
+impl Support {
+    pub fn init(display: glium_sdl2::Display, sdl_context: sdl2::Sdl) -> Support {
+        let mut imgui      = ImGui::init();
+        let renderer       = Renderer::init(&mut imgui, &display).unwrap();
+        let event_pump     = sdl_context.event_pump().unwrap();
+
+        imgui.set_imgui_key(ImGuiKey::Tab,        0);
+        imgui.set_imgui_key(ImGuiKey::LeftArrow,  1);
+        imgui.set_imgui_key(ImGuiKey::RightArrow, 2);
+        imgui.set_imgui_key(ImGuiKey::UpArrow,    3);
+        imgui.set_imgui_key(ImGuiKey::DownArrow,  4);
+        imgui.set_imgui_key(ImGuiKey::PageUp,     5);
+        imgui.set_imgui_key(ImGuiKey::PageDown,   6);
+        imgui.set_imgui_key(ImGuiKey::Home,       7);
+        imgui.set_imgui_key(ImGuiKey::End,        8);
+        imgui.set_imgui_key(ImGuiKey::Delete,     9);
+        imgui.set_imgui_key(ImGuiKey::Backspace, 10);
+        imgui.set_imgui_key(ImGuiKey::Enter,     11);
+        imgui.set_imgui_key(ImGuiKey::Escape,    12);
+        imgui.set_imgui_key(ImGuiKey::A,         13);
+        imgui.set_imgui_key(ImGuiKey::C,         14);
+        imgui.set_imgui_key(ImGuiKey::V,         15);
+        imgui.set_imgui_key(ImGuiKey::X,         16);
+        imgui.set_imgui_key(ImGuiKey::Y,         17);
+        imgui.set_imgui_key(ImGuiKey::Z,         18);
+
+        Support {
+            display:       display,
+            event_pump:    event_pump,
+            imgui:         imgui,
+            renderer:      renderer,
+            last_frame:    Instant::now(),
+            mouse_pos:     (0, 0),
+            mouse_pressed: (false, false, false),
+            mouse_wheel:   0.0,
+        }
+    }
+
+    pub fn update_mouse(&mut self) {
+        let scale = self.imgui.display_framebuffer_scale();
+        self.imgui.set_mouse_pos(self.mouse_pos.0 as f32 / scale.0, self.mouse_pos.1 as f32 / scale.1);
+        self.imgui.set_mouse_down(&[self.mouse_pressed.0, self.mouse_pressed.1, self.mouse_pressed.2, false, false]);
+        self.imgui.set_mouse_wheel(self.mouse_wheel / scale.1);
+        self.mouse_wheel = 0.0;
+    }
+
+    pub fn render<F: FnMut(&Ui)>(&mut self, clear_color: (f32, f32, f32, f32), mut run_ui: F) {
+        use glium::Surface;
+        let now     = Instant::now();
+        let delta   = now - self.last_frame;
+        let delta_s = delta.as_secs() as f32 + delta.subsec_nanos() as f32 / 1_000_000_000.0;
+        self.last_frame = now;
+
+        self.update_mouse();
+
+        let mut frame   = self.display.draw();
+        frame.clear_color(clear_color.0, clear_color.1, clear_color.2, clear_color.3);
+        let window      = self.display.window();
+
+        let size_pixels = window.drawable_size();
+        // TODO: it might be wrong to use the size_pixels twice, the
+        // code this is based off of also had a `size_points`, but
+        // I'm not sure what tht means or how to calculate it.
+        let ui = self.imgui.frame(size_pixels, size_pixels, delta_s);
+
+        run_ui(&ui);
+
+        self.renderer.render(&mut frame, ui).unwrap();
+
+        frame.finish().unwrap();
+    }
+
+    pub fn update_events(&mut self) -> bool {
+        let set_key_state = |imgui: &mut ImGui, scancode: Option<sdl2::keyboard::Scancode>, pressed: bool| {
+            use sdl2::keyboard::Scancode;
+            match scancode {
+                Some(Scancode::Tab)                             => imgui.set_key(0,  pressed),
+                Some(Scancode::Left)                            => imgui.set_key(1,  pressed),
+                Some(Scancode::Right)                           => imgui.set_key(2,  pressed),
+                Some(Scancode::Up)                              => imgui.set_key(3,  pressed),
+                Some(Scancode::Down)                            => imgui.set_key(4,  pressed),
+                Some(Scancode::PageUp)                          => imgui.set_key(5,  pressed),
+                Some(Scancode::PageDown)                        => imgui.set_key(6,  pressed),
+                Some(Scancode::Home)                            => imgui.set_key(7,  pressed),
+                Some(Scancode::End)                             => imgui.set_key(8,  pressed),
+                Some(Scancode::Delete)                          => imgui.set_key(9,  pressed),
+                Some(Scancode::Backspace)                       => imgui.set_key(10, pressed),
+                Some(Scancode::Return)                          => imgui.set_key(11, pressed),
+                Some(Scancode::Escape)                          => imgui.set_key(12, pressed),
+                Some(Scancode::A)                               => imgui.set_key(13, pressed),
+                Some(Scancode::C)                               => imgui.set_key(14, pressed),
+                Some(Scancode::V)                               => imgui.set_key(15, pressed),
+                Some(Scancode::X)                               => imgui.set_key(16, pressed),
+                Some(Scancode::Y)                               => imgui.set_key(17, pressed),
+                Some(Scancode::Z)                               => imgui.set_key(18, pressed),
+                Some(Scancode::LCtrl)  | Some(Scancode::RCtrl)  => imgui.set_key_ctrl(pressed),
+                Some(Scancode::LShift) | Some(Scancode::RShift) => imgui.set_key_shift(pressed),
+                Some(Scancode::LAlt)   | Some(Scancode::RAlt)   => imgui.set_key_alt(pressed),
+                Some(Scancode::LGui)   | Some(Scancode::RGui)   => imgui.set_key_super(pressed),
+                _ => {}
+            };
         };
-        drawer.frame.clear_color(0.0, 0.0, 1.0, 1.0);
-        let ui_context = immi::draw();
-        let ui_context = ui_context.draw(window_width, window_height, &mut drawer, None, false, false);
-        
-        draw_ui(&ui_context, &mut ui_state);
-        ui_context.draw().frame.set_finish().unwrap();
-        
-        for ev in display.poll_events() {
-            match ev {
-                glium::glutin::Event::Closed => break 'main,
-                _ => {
-                }
+
+        for event in self.event_pump.poll_iter() {
+            use sdl2::event::Event;
+            match event {
+                Event::Quit   { .. }           => return false,
+                Event::KeyDown{ scancode, .. } => {
+                    set_key_state(&mut self.imgui, scancode, true);
+                },
+                Event::KeyUp  { scancode, .. } => {
+                    set_key_state(&mut self.imgui, scancode, false);
+                },
+                Event::MouseMotion{ x,y, .. }  => self.mouse_pos = (x,y),
+                Event::MouseButtonDown{ mouse_btn, .. } => {
+                    use sdl2::mouse::Mouse;
+                    match mouse_btn {
+                        Mouse::Left   => self.mouse_pressed.0 = true,
+                        Mouse::Right  => self.mouse_pressed.1 = true,
+                        Mouse::Middle => self.mouse_pressed.2 = true,
+                        _             => ()
+                    }
+                },
+                Event::MouseButtonUp{ mouse_btn, .. } => {
+                    use sdl2::mouse::Mouse;
+                    match mouse_btn {
+                        Mouse::Left   => self.mouse_pressed.0 = false,
+                        Mouse::Right  => self.mouse_pressed.0 = false,
+                        Mouse::Middle => self.mouse_pressed.0 = false,
+                        _             => ()
+                    }
+                },
+                Event::MouseWheel{ y,   .. } => self.mouse_wheel = y as f32,
+                Event::TextInput{ text, .. } => {
+                    for c in text.chars() {
+                        self.imgui.add_input_character(c);
+                    }
+                },
+                _                  => (),
             }
         }
+        true
     }
+
 }

@@ -13,5 +13,9 @@ glutin     = "*"
 rusttype   = "*"
 immi       = "*"
 image      = "*"
-
+sdl2       = "*"
+rand       = "*"
+time       = "*"
+glium_sdl2 = { path = "./deps/glium-sdl2" }
+imgui      = { path = "./deps/imgui-rs"   }
 
