@@ -82,10 +82,6 @@ impl AudioCallback for Squarewave {
 
 fn start_squarewave(sdl_context: &sdl2::Sdl) -> sdl2::audio::AudioDevice<Squarewave>
 {
-
-    // TODO: we need a way to signal exit sharing a channel with
-    // the main thread would be a nice abstraction.
-
     let audio_subsystem = sdl_context.audio().unwrap();
 
     let audio_spec = AudioSpecDesired {
@@ -166,8 +162,8 @@ fn main() {
 
     // For reasons I don't understand, if we don't name the result of
     // start_squarewave then it will never start playing. Perhaps it
-    // gets dropped immediately which would cause the thread to get
-    // killed.
+    // gets dropped immediately which would causes something to get
+    // cleaned up?
     let x = start_squarewave(&sdl_context);
 
     let mut support = Support::init(display, sdl_context);
@@ -182,7 +178,7 @@ fn main() {
     }
 }
 
-fn draw_scene(frame: &mut glium::Frame,
+fn draw_scene(frame:   &mut glium::Frame,
               display: &mut glium_sdl2::Display,
               texture: &Texture2d,
               program: &glium::Program)
@@ -239,7 +235,6 @@ fn display_info<'a>(ui: &Ui<'a>) {
 use imgui::*;
 use imgui::glium_renderer::Renderer;
 use std::time::Instant;
-
 
 struct Support {
     display:       glium_sdl2::Display,
@@ -399,5 +394,4 @@ impl Support {
         }
         true
     }
-
 }
