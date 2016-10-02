@@ -24,7 +24,7 @@ fn print_context_info(display: &glium_sdl2::SDL2Facade)
     };
 
     println!("{} context version: {}", api, display.get_opengl_version_string());
-    println!("{} context flags:", api);
+    print!("{} context flags:", api);
 
     if display.is_forward_compatible() {
         print!(" forward-compatible");
