@@ -119,10 +119,14 @@ fn main() {
     gl_attr.set_context_major_version(4);
     gl_attr.set_context_minor_version(1);
 
-    let window_width  = 1024;
-    let window_height = 768;
-    let display       = video_subsystem.window("Rust 2D Demo", window_width, window_height)
-        .resizable()
+    let display_mode  = video_subsystem.current_display_mode(0).unwrap();
+    println!("Display mode: {:?}", display_mode);
+    let display       = video_subsystem.window("Rust 2D Demo", display_mode.w as u32, display_mode.h as u32)
+    // I would prefer to use fullscreen_desktop here, but on my mac
+    // that does a weird thing where the window starts out the right
+    // size but then resizes itself such that the top 20% or so of the
+    // screen shows the desktop.
+        .fullscreen()
         .build_glium()
         .unwrap();
     print_context_info(&display);
@@ -363,6 +367,10 @@ impl Support {
             match event {
                 Event::Quit   { .. }           => return false,
                 Event::KeyDown{ scancode, .. } => {
+                    // Special case to exit when escape is pressed.
+                    if scancode == Some(sdl2::keyboard::Scancode::Escape) {
+                        return false
+                    }
                     set_key_state(&mut self.imgui, scancode, true);
                 },
                 Event::KeyUp  { scancode, .. } => {
