@@ -114,6 +114,10 @@ fn main() {
     let video_subsystem = sdl_context.video().unwrap();
     let gl_attr         = video_subsystem.gl_attr();
     gl_attr.set_context_profile(GLProfile::Core);
+    // For now we request a 4.1 OpenGL Context. This should work most
+    // everywhere as long as the GPU is from about 2011 or so.
+    gl_attr.set_context_major_version(4);
+    gl_attr.set_context_minor_version(1);
 
     let window_width  = 1024;
     let window_height = 768;
