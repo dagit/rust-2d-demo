@@ -19,7 +19,33 @@ In addition to the minimal requirements we also hope to reuse this template for 
 
 ## Windows
 
-TODO
+1. Visit SDL [download page](https://www.libsdl.org/download-2.0.php)
+  and grab the correct SDL development libraries. I use the msvc
+  toolchain, so I grab the Visual C++ development libraries.
+
+  If you're on msvc you'll need to set `LIB` to point to `SDL2.lib`. In
+  my case, I unzipped the files to my desktop and I set the following
+  path:
+
+  ```sh
+  export LIB="C:\Users\dagit\Desktop\SDL2-2.0.5\lib\x64"
+  ```
+
+  On the GNU toolchain you set `LIBRARY_PATH` instead of `LIB`.
+
+2. Copy `SDL2.dll` into the top of your crate (next to `Cargo.toml`).
+
+3. Checkout/update git submodules:
+
+    ```sh
+    $ git submodule update --init --recursive
+    ```
+
+  If you encounter an error during this step, I may need to give you access to
+  the scene-rs repository.
+
+4. Use cargo as normal, eg., `cargo build`
+
 
 ## Linux
 
